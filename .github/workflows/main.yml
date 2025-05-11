@@ -1,0 +1,159 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      BITTER_API_KEY: ${{ secrets.BITTER_API_KEY }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set package name from repository name
+        id: set_package_name
+        run: echo "PACKAGE_NAME=$(basename $GITHUB_REPOSITORY)" >> $GITHUB_ENV
+
+      - name: Setup PHP with Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Run composer install if composer.json exists
+        run: |
+          if [ -f "composer.json" ]; then
+            echo "Running composer install..."
+            composer install --no-interaction --prefer-dist --no-progress
+          fi
+
+      - name: Run npm install on build, and run npm run production if package.json exists
+        run: |
+          if [ -f "build/package.json" ]; then
+            echo "Running npm install..."
+            cd build
+            if [ -f "package-lock.json" ]; then
+              echo "Using npm ci (lockfile found)"
+              npm ci
+            else
+              echo "Using npm install (no lockfile found)"
+              npm install
+            fi
+            npm run production
+            cd ..
+          fi
+
+      - name: Run npm install, install grunt and run grunt if package.json exists
+        run: |
+          if [ -f "package.json" ]; then
+            echo "Running npm install..."
+            npm install
+            echo "Installing grunt-cli globally..."
+            npm install -g grunt-cli
+            echo "Running grunt..."
+            grunt
+          fi
+
+      - name: Upload ZIP to bitter.de API
+        run: |
+          FILE_PATH="release/${PACKAGE_NAME}.zip"
+          if [ -f "$FILE_PATH" ]; then
+            echo "Uploading $FILE_PATH to bitter.de..."
+            curl -F "file=@$FILE_PATH" "https://bitter.de/index.php/api/v1/addons/update/${{ env.PACKAGE_NAME }}?apikey=${BITTER_API_KEY}"
+          else
+            echo "File $FILE_PATH not found, skipping upload."
+          fi
+
+      - name: Upload ZIP to Concrete CMS Marketplace
+        uses: bitterdev/concrete-package-uploader@v1
+        with:
+          uuid: ${{ secrets.CONCRETE_MARKETPLACE_UUID }}
+          username: ${{ secrets.CONCRETE_MARKETPLACE_USERNAME }}
+          password: ${{ secrets.CONCRETE_MARKETPLACE_PASSWORD }}
+          packageFile: release/${{ env.PACKAGE_NAME }}.zip
+
+      - name: Set Git user
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create a tag if not exists
+        run: |
+          git fetch --tags
+          if git rev-parse "nightly" >/dev/null 2>&1; then
+            echo "Tag 'nightly' already exists."
+          else
+            git tag -a nightly -m "Nightly build tag"
+            git push origin nightly
+          fi
+
+      - name: Create or update release to GitHub
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: nightly
+          name: Nightly Build
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload release asset to GitHub
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: nightly
+          files: release/${{ env.PACKAGE_NAME }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup trash files and folders
+        run: |
+          echo "Cleaning up unnecessary files and directories..."
+
+          # Directories
+          rm -rf node_modules
+          rm -rf release
+          rm -rf .git
+          rm -rf dist
+          rm -rf build
+          rm -rf .vscode
+          rm -rf .idea
+          rm -rf .cache
+          rm -rf coverage
+          rm -rf tmp
+          rm -rf temp
+
+          # Files
+          find . -type f -name "*.log" -delete
+          find . -type f -name "*.bak" -delete
+          find . -type f -name "*.swp" -delete
+          find . -type f -name "*.swo" -delete
+          find . -type f -name ".DS_Store" -delete
+          find . -type f -name "Thumbs.db" -delete
+
+          echo "Cleanup complete."
+
+      - name: Deploy to production server
+        uses: burnett01/rsync-deployments@4.1
+        with:
+          switches: -avzr --ignore-errors
+          path: /
+          remote_port: 65002
+          remote_path: /home/u187151543/domains/bitter.de/public_html/packages/${{ env.PACKAGE_NAME }}
+          remote_host: 213.130.145.194
+          remote_user: u187151543
+          remote_key: ${{ secrets.PRODUCTION_SSH_KEY }}
