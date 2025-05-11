@@ -38,7 +38,7 @@ class Controller extends Package
                 $v = View::getInstance();
                 /** @var Html $htmlService */
                 $htmlService = $this->app->make(Html::class);
-                $v->addHeaderItem($htmlService->javascript("email-obfuscator.js", "email_obfuscator"));
+                $v->addHeaderItem($htmlService->javascript("email-obfuscator.js", "simple_email_obfuscator"));
             }
         });
 
