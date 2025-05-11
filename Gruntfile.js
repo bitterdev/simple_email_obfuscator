@@ -1,4 +1,4 @@
-var packageName = "email_obfuscator";
+var packageName = "simple_email_obfuscator";
 
 module.exports = function (grunt) {
     grunt.initConfig({

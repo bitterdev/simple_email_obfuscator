@@ -1,5 +1,5 @@
 {
-  "name": "bitter/email_obfuscator",
+  "name": "bitter/simple_email_obfuscator",
   "type": "concrete5-package",
   "description": "Email Obfuscator is a Concrete CMS add-on that hides your inline Email code by obfuscating it, improving security and protecting your source logic."
 }
